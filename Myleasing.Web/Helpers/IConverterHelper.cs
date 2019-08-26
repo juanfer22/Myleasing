@@ -7,5 +7,7 @@ namespace Myleasing.Web.Helpers
     public interface IConverterHelper
     {
         Task<Property> ToPropertyAsync(PropertyViewModel view);
+
+        PropertyViewModel ToPropertyViewModel(Property property);
     }
 }
