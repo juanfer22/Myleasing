@@ -1,8 +1,14 @@
 ﻿using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.Rendering;
 using Microsoft.EntityFrameworkCore;
+using Myleasing.Web.Data.Entities;
 using Myleasing.Web.Date;
 using Myleasing.Web.Date.Entities;
+using Myleasing.Web.Helpers;
+using Myleasing.Web.Models;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 
@@ -12,10 +18,19 @@ namespace Myleasing.Web.Controllers
     public class OwnersController : Controller
     {
         private readonly DataContext _dataContext;
+        private readonly IUserHelper _userHelper;
+        private readonly ICombosHelper _combosHelper;
+        private readonly IConverterHelper _converterHelper;
 
-        public OwnersController(DataContext dataContext)
+        public OwnersController(DataContext dataContext,
+            IUserHelper userHelper,
+            ICombosHelper combosHelper,
+            IConverterHelper converterHelper)
         {
             _dataContext = dataContext;
+            _userHelper = userHelper;
+            _combosHelper = combosHelper;
+            _converterHelper = converterHelper;
         }
 
         // GET: Owners
@@ -58,21 +73,60 @@ namespace Myleasing.Web.Controllers
             return View();
         }
 
-        // POST: Owners/Create
-        // To protect from overposting attacks, please enable the specific properties you want to bind to, for 
-        // more details see http://go.microsoft.com/fwlink/?LinkId=317598.
+
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create([Bind("Id")] Owner owner)
+        public async Task<IActionResult> Create(AddUserViewModel view)
         {
             if (ModelState.IsValid)
             {
-                _dataContext.Add(owner);
+                var user = await AddUser(view);
+                if (user == null)
+                {
+                    ModelState.AddModelError(string.Empty, "This email is already used.");
+                    return View(view);
+                }
+
+                var owner = new Owner
+                {
+                    Properties = new List<Property>(),
+                    Contracts = new List<Contract>(),
+                    User = user,
+                };
+
+                _dataContext.Owners.Add(owner);
                 await _dataContext.SaveChangesAsync();
                 return RedirectToAction(nameof(Index));
             }
-            return View(owner);
+
+            return View(view);
         }
+
+        private async Task<User> AddUser(AddUserViewModel view)
+        {
+            var user = new User
+            {
+                Address = view.Address,
+                Document = view.Document,
+                Email = view.Username,
+                FirstName = view.FirstName,
+                LastName = view.LastName,
+                PhoneNumber = view.PhoneNumber,
+                UserName = view.Username
+            };
+
+            var result = await _userHelper.AddUserAsync(user, view.Password);
+            if (result != IdentityResult.Success)
+            {
+                return null;
+            }
+
+            var newUser = await _userHelper.GetUserByEmailAsync(view.Username);
+            await _userHelper.AddUserToRoleAsync(newUser, "Owner");
+            return newUser;
+        }
+
+
 
         // GET: Owners/Edit/5
         public async Task<IActionResult> Edit(int? id)
@@ -158,5 +212,46 @@ namespace Myleasing.Web.Controllers
         {
             return _dataContext.Owners.Any(e => e.Id == id);
         }
+
+        public async Task<IActionResult> AddProperty(int? id)
+        {
+            if (id == null)
+            {
+                return NotFound();
+            }
+
+            var owner = await _dataContext.Owners.FindAsync(id.Value);
+            if (owner == null)
+            {
+                return NotFound();
+            }
+
+            var view = new PropertyViewModel 
+            {
+                OwnerId = owner.Id,
+                PropertyTypes = _combosHelper.GetComboPropertyTypes()
+            };
+
+            return View(view);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> AddProperty(PropertyViewModel view)
+        {
+            if (ModelState.IsValid)
+            {
+                var property = await _converterHelper.ToPropertyAsync(view);
+                _dataContext.Properties.Add(property);
+                await _dataContext.SaveChangesAsync();
+                return RedirectToAction($"{nameof(Details)}/{view.OwnerId}");
+            }
+
+            return View(view);
+        }
+
+       
+
+        
+
     }
 }
